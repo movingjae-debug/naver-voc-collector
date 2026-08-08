@@ -1,0 +1,13 @@
+# API 키 (절대 커밋 금지)
+config_local.py
+.streamlit/secrets.toml
+
+# 수집 결과물
+*.xlsx
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
