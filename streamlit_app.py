@@ -32,6 +32,13 @@ with st.sidebar:
     expand = st.toggle("자동완성으로 키워드 확장", value=True)
     max_sug = st.slider("시드당 확장 키워드 수", 0, 15, voc.MAX_SUGGESTIONS_PER_SEED)
 
+    st.subheader("필터")
+    parent_filter = st.toggle(
+        "학부모 글만 수집", value=True,
+        help="제목/요약에 '아들·딸·자녀·우리 아이' 같은 학부모 표현이 있는 글만 남깁니다.",
+    )
+    display_per_channel = st.slider("채널당 수집 건수", 10, 100, voc.DISPLAY_PER_CHANNEL, step=10)
+
     st.subheader("채널")
     channels = {}
     for name in voc.CHANNELS:
@@ -48,6 +55,8 @@ if st.button("🚀 수집 시작", type="primary", use_container_width=True):
 
     voc.CHANNELS.update(channels)
     voc.MAX_SUGGESTIONS_PER_SEED = max_sug
+    voc.PARENT_FILTER = parent_filter
+    voc.DISPLAY_PER_CHANNEL = display_per_channel
 
     # 1) 키워드 확장
     with st.status("🌱 키워드 확장 중...", expanded=True) as status:
@@ -70,6 +79,11 @@ if st.button("🚀 수집 시작", type="primary", use_container_width=True):
         progress.progress((i + 1) / len(keywords), text=f"수집 중... [{kw}] ({i + 1}/{len(keywords)})")
         all_rows.extend(voc.collect_keyword(kw, today))
     progress.empty()
+
+    deduped = voc.dedupe_rows(all_rows)
+    if len(deduped) < len(all_rows):
+        st.info(f"🔁 중복 제거: 같은 글 {len(all_rows) - len(deduped)}건을 제외했습니다.")
+    all_rows = deduped
 
     if not all_rows:
         st.warning("수집된 데이터가 없습니다. API 키와 키워드를 확인해주세요.")
