@@ -17,7 +17,7 @@ except FileNotFoundError:
 
 st.set_page_config(page_title="타겟 인사이트 수집기", page_icon="🔍", layout="wide")
 st.title("🔍 타겟 인사이트 수집기")
-st.caption("네이버 카페·블로그·지식iN에서 학부모들의 실제 목소리를 수집합니다. 시드 키워드는 자동완성으로 확장됩니다.")
+st.caption("네이버 카페·블로그·지식iN에서 타겟들의 실제 목소리를 수집합니다. 시드 키워드는 자동완성으로 확장됩니다.")
 
 # ── 사이드바: 수집 설정 ──────────────────────────────
 with st.sidebar:
@@ -130,12 +130,9 @@ if "voc_df" in st.session_state:
     # ── 키워드 분석 & 콘텐츠 초안 ──────────────────────────────
     st.divider()
     st.header("🧩 콘텐츠 소재 분석")
-    st.caption(
-        "수집된 글에서 자주 언급된 키워드 TOP 5를 뽑고, 키워드별 관련 뉴스와 "
-        "블로그/카드뉴스 제목 초안을 만듭니다. 📢 표시는 보도자료로 추정되는 기사입니다."
-    )
+    st.caption("수집된 글에서 자주 언급된 키워드 TOP 5를 뽑습니다. 📢 표시는 보도자료로 추정되는 기사입니다.")
 
-    if st.button("🔎 TOP 5 키워드 분석 & 초안 생성", use_container_width=True):
+    if st.button("🔎 TOP 5 키워드 분석", use_container_width=True):
         rows = df.to_dict("records")
         with st.status("키워드 추출 중... (첫 실행은 형태소 분석기 로딩으로 수십 초 걸릴 수 있어요)") as status:
             top_keywords = planner.extract_top_keywords(rows, top_n=5)
@@ -143,13 +140,7 @@ if "voc_df" in st.session_state:
             for entry in top_keywords:
                 kw = entry["키워드"]
                 status.update(label=f"관련 뉴스 검색 중... [{kw}]")
-                news = planner.search_news(kw)
-                plan.append({
-                    **entry,
-                    "뉴스": news,
-                    "블로그초안": planner.blog_idea_drafts(kw, entry["예시글"], news),
-                    "카드뉴스초안": planner.cardnews_idea_drafts(kw, entry["예시글"], news),
-                })
+                plan.append({**entry, "뉴스": planner.search_news(kw)})
             status.update(label="✅ 분석 완료", state="complete")
         st.session_state["content_plan"] = plan
 
@@ -173,13 +164,3 @@ if "voc_df" in st.session_state:
                     st.markdown(f"- [{article['제목']}]({article['링크']}){label}")
             else:
                 st.markdown("_관련 뉴스를 찾지 못했습니다._")
-
-            col_blog, col_card = st.columns(2)
-            with col_blog:
-                st.markdown("##### ✍️ 블로그 제목 초안")
-                for t in entry["블로그초안"]:
-                    st.markdown(f"- {t}")
-            with col_card:
-                st.markdown("##### 🃏 카드뉴스 주제 초안")
-                for t in entry["카드뉴스초안"]:
-                    st.markdown(f"- {t}")

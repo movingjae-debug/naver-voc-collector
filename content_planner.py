@@ -115,8 +115,14 @@ def extract_top_keywords(rows, top_n=5):
             continue
         picked.append(term)
 
+    # 예시글은 키워드가 제목에 직접 들어간 글을 앞에 배치
+    # (요약에만 스치듯 언급된 글이 대표 예시로 뜨는 것 방지)
     return [
-        {"키워드": term, "언급글수": len(keyword_rows[term]), "예시글": keyword_rows[term]}
+        {
+            "키워드": term,
+            "언급글수": len(keyword_rows[term]),
+            "예시글": sorted(keyword_rows[term], key=lambda r: term not in r.get("제목", "")),
+        }
         for term in picked
     ]
 
@@ -142,8 +148,25 @@ def is_press_release(title, description):
         return True
     return any(re.search(p, title) for p in PRESS_RELEASE_PATTERNS)
 
+# 지역 행정·지자체 소식 판별용 지역명 (전국 단위 소재가 아닌 기사를 목록 뒤로 보냄)
+REGION_NAMES = [
+    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
+    "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
+    "수원", "성남", "용인", "고양", "창원", "청주", "천안", "전주", "안산",
+    "안양", "김해", "평택", "포항", "구미", "원주", "진주", "춘천", "여수",
+    "순천", "목포", "군산", "익산", "경주", "거제", "양산", "아산", "파주",
+    "시흥", "김포", "광명", "군포", "오산", "이천", "안성", "의정부",
+    "남양주", "화성", "부천", "하남", "구리", "강릉", "충주", "제천",
+    "당진", "서산", "논산", "공주", "정읍", "나주", "광양", "상주",
+    "안동", "영주", "영천", "밀양", "통영", "사천", "서귀포",
+]
+
+def is_regional_news(title):
+    """지역명으로 시작하는 지자체·지역 소식인지"""
+    return any(title.startswith(region) for region in REGION_NAMES)
+
 def search_news(keyword, display=8):
-    """키워드 관련 최신 뉴스 검색 (보도자료 추정 라벨 포함)"""
+    """키워드 관련 최신 뉴스 검색 (보도자료 추정 라벨 포함, 지역 소식은 뒤로)"""
     result = voc.search_naver(keyword, "news", display=display, sort="sim")
     if not result or "items" not in result:
         return []
@@ -157,66 +180,7 @@ def search_news(keyword, display=8):
             "링크": item.get("originallink") or item.get("link", ""),
             "보도자료추정": is_press_release(title, description),
         })
+    # 전국 단위 기사 → 지역 소식 → 보도자료 추정 순으로 정렬 (배제는 안 함)
+    articles.sort(key=lambda a: (a["보도자료추정"], is_regional_news(a["제목"])))
     return articles
 
-# ── 콘텐츠 초안 (수집 데이터 주입형) ──────────────────────────────
-# 실제 학부모 질문·뉴스를 소재로 쓰고, 부족한 자리만 템플릿으로 채움
-
-BLOG_TEMPLATES = [
-    "{kw}, 학부모가 가장 많이 묻는 질문 5가지",
-    "우리 아이 {kw} 고민, 이렇게 접근해보세요",
-    "{kw}에 대해 학부모들이 자주 하는 오해 3가지",
-]
-
-CARDNEWS_TEMPLATES = [
-    "{kw} 체크리스트: 우리 아이는 지금 어디쯤?",
-    "{kw} 대응 3단계 가이드",
-    "선배맘들의 {kw} 조언 모음.zip",
-]
-
-# 질문형 글 제목 판별 (물음표 또는 한국어 의문형 어미)
-QUESTION_PATTERN = re.compile(r"[?？]|(나요|까요|할까|일까|은지|는지|하죠|인가요|건가요)\s*$|(어떻게|어디|언제|왜|뭐|얼마나)")
-
-def _question_titles(posts, limit=3):
-    """수집된 글 중 질문형 제목만 골라냄"""
-    out = []
-    for row in posts:
-        title = row.get("제목", "").strip()
-        if title and QUESTION_PATTERN.search(title):
-            out.append(title)
-        if len(out) >= limit:
-            break
-    return out
-
-def _usable_news(news, limit=2):
-    """보도자료 추정이 아닌 기사만"""
-    return [a for a in news if not a.get("보도자료추정")][:limit]
-
-def blog_idea_drafts(keyword, posts, news, total=5):
-    """블로그 주제 초안: 실제 질문 답변형 + 뉴스 해설형 + 템플릿 백업"""
-    ideas = []
-    for title in _question_titles(posts, 2):
-        ideas.append(f'실제 질문에 답하기 — “{title}”')
-    for article in _usable_news(news, 1):
-        ideas.append(f'뉴스 풀어쓰기 — “{article["제목"]}”을(를) 학부모 눈높이로 해설')
-    for t in BLOG_TEMPLATES:
-        if len(ideas) >= total:
-            break
-        ideas.append(t.format(kw=keyword))
-    return ideas[:total]
-
-def cardnews_idea_drafts(keyword, posts, news, total=5):
-    """카드뉴스 주제 초안: 실제 고민 Q&A형 + 기사 요약형 + 템플릿 백업"""
-    ideas = []
-    questions = _question_titles(posts, 3)
-    if questions:
-        ideas.append(
-            f"‘{keyword}’ 실제 고민 Q&A 카드 — " + " / ".join(f"“{q}”" for q in questions[:2])
-        )
-    for article in _usable_news(news, 1):
-        ideas.append(f'기사 한 장 요약 — “{article["제목"]}” 핵심만 카드로')
-    for t in CARDNEWS_TEMPLATES:
-        if len(ideas) >= total:
-            break
-        ideas.append(t.format(kw=keyword))
-    return ideas[:total]
