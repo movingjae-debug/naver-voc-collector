@@ -255,7 +255,7 @@ def collect_all(keywords):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🚀 아틀라스 VOC 수집 시작")
+    print("🚀 타겟 인사이트 수집 시작")
     print("=" * 50)
 
     print("\n📌 시드 키워드 자동 확장 중...")

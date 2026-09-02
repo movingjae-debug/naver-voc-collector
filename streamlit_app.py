@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import naver_voc_collector as voc
+import content_planner as planner
 
 # Streamlit Cloud 배포 시 secrets에서 API 키 읽기 (로컬은 config_local.py 사용)
 try:
@@ -14,9 +15,9 @@ try:
 except FileNotFoundError:
     pass
 
-st.set_page_config(page_title="아틀라스 VOC 수집기", page_icon="🔍", layout="wide")
-st.title("🔍 아틀라스 VOC 수집기")
-st.caption("네이버 카페·블로그·지식iN에서 학부모 VOC를 수집합니다. 시드 키워드는 자동완성으로 확장됩니다.")
+st.set_page_config(page_title="타겟 인사이트 수집기", page_icon="🔍", layout="wide")
+st.title("🔍 타겟 인사이트 수집기")
+st.caption("네이버 카페·블로그·지식iN에서 학부모들의 실제 목소리를 수집합니다. 시드 키워드는 자동완성으로 확장됩니다.")
 
 # ── 사이드바: 수집 설정 ──────────────────────────────
 with st.sidebar:
@@ -91,6 +92,7 @@ if st.button("🚀 수집 시작", type="primary", use_container_width=True):
 
     df = pd.DataFrame(all_rows)
     st.session_state["voc_df"] = df
+    st.session_state.pop("content_plan", None)  # 새 수집이면 이전 분석 결과 무효화
 
 # ── 결과 표시 ──────────────────────────────
 if "voc_df" in st.session_state:
@@ -113,3 +115,59 @@ if "voc_df" in st.session_state:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+
+    # ── 키워드 분석 & 콘텐츠 초안 ──────────────────────────────
+    st.divider()
+    st.header("🧩 콘텐츠 소재 분석")
+    st.caption(
+        "수집된 글에서 자주 언급된 키워드 TOP 5를 뽑고, 키워드별 관련 뉴스와 "
+        "블로그/카드뉴스 제목 초안을 만듭니다. 📢 표시는 보도자료로 추정되는 기사입니다."
+    )
+
+    if st.button("🔎 TOP 5 키워드 분석 & 초안 생성", use_container_width=True):
+        rows = df.to_dict("records")
+        with st.status("키워드 추출 중... (첫 실행은 형태소 분석기 로딩으로 수십 초 걸릴 수 있어요)") as status:
+            top_keywords = planner.extract_top_keywords(rows, top_n=5)
+            plan = []
+            for entry in top_keywords:
+                kw = entry["키워드"]
+                status.update(label=f"관련 뉴스 검색 중... [{kw}]")
+                plan.append({
+                    **entry,
+                    "뉴스": planner.search_news(kw),
+                    "블로그초안": planner.blog_title_ideas(kw),
+                    "카드뉴스초안": planner.cardnews_ideas(kw),
+                })
+            status.update(label="✅ 분석 완료", state="complete")
+        st.session_state["content_plan"] = plan
+
+    for i, entry in enumerate(st.session_state.get("content_plan", []), start=1):
+        kw = entry["키워드"]
+        with st.expander(f"**{i}위. {kw}** — {entry['언급글수']}건의 글에서 언급", expanded=(i == 1)):
+            st.markdown("##### 💬 학부모들은 이렇게 말해요")
+            for row in entry["예시글"][:5]:
+                link = row.get("링크", "")
+                title = row.get("제목", "")
+                channel = row.get("채널", "")
+                if link:
+                    st.markdown(f"- [{title}]({link}) `{channel}`")
+                else:
+                    st.markdown(f"- {title} `{channel}`")
+
+            st.markdown("##### 📰 관련 뉴스")
+            if entry["뉴스"]:
+                for article in entry["뉴스"]:
+                    label = " 📢 `보도자료 추정`" if article["보도자료추정"] else ""
+                    st.markdown(f"- [{article['제목']}]({article['링크']}){label}")
+            else:
+                st.markdown("_관련 뉴스를 찾지 못했습니다._")
+
+            col_blog, col_card = st.columns(2)
+            with col_blog:
+                st.markdown("##### ✍️ 블로그 제목 초안")
+                for t in entry["블로그초안"]:
+                    st.markdown(f"- {t}")
+            with col_card:
+                st.markdown("##### 🃏 카드뉴스 주제 초안")
+                for t in entry["카드뉴스초안"]:
+                    st.markdown(f"- {t}")
