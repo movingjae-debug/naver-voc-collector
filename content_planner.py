@@ -18,10 +18,15 @@ def _get_kiwi():
 # ✅ 키워드 추출 제외 단어
 #    - 학부모 화자 시그널(아이·엄마 등)은 거의 모든 글에 들어가서 순위만 차지함
 #    - 검색 시드에 이미 들어간 일반 단어(중학생 등)도 마찬가지
-STOPWORDS = {
-    # 화자/가족 표현
+# 화자/가족 표현 + 잡토큰: 단독으로도, 명사구의 일부로도 쓰지 않음
+# ("아이 수학" 같은 구가 만들어지는 것 방지)
+HARD_STOPWORDS = {
     "아이", "아들", "딸", "자녀", "엄마", "아빠", "부모", "학부모", "부모님",
     "애들", "우리", "저희", "육아", "형제", "남매",
+    "vs", "및", "관련", "대비",
+}
+
+STOPWORDS = {
     # 시드에 이미 포함된 일반 단어
     "중학생", "초등학생", "고등학생", "학생", "중딩", "초딩", "고딩",
     "중학교", "초등학교", "고등학교", "학교", "학년",
@@ -30,47 +35,89 @@ STOPWORDS = {
     "생각", "요즘", "진짜", "정말", "너무", "혹시", "궁금", "문의",
     "이야기", "얘기", "글", "내용", "경우", "정도", "때문", "이번",
     "오늘", "내일", "어제", "시간", "하루", "동안", "시작", "마음",
+    # 단독으로는 소재가 안 되는 저정보 단어 (명사구의 일부로는 허용됨)
+    "중학", "초등", "고등", "준비", "방법", "필요", "문제", "상황",
+    "이유", "부분", "가능", "도움", "느낌", "말씀", "정말로",
 }
 
-def extract_top_keywords(rows, top_n=5):
-    """수집된 글의 제목+요약에서 명사를 뽑아 언급 글 수 기준 top N 반환.
+# 명사구(2단어)가 단어 하나보다 콘텐츠 소재로 구체적이므로 순위에 가중치를 줌
+BIGRAM_WEIGHT = 1.5
 
-    같은 글에서 여러 번 나와도 1회로 세서(문서 빈도) 한 글이 순위를 왜곡하지 않게 함.
+def _noun_chunks(kiwi, text):
+    """붙어 있는 명사 토큰을 복합명사로 합쳐 (단어, 시작, 끝) 목록 반환.
+    ("레벨"+"테스트" → "레벨테스트"). 'AI' 같은 영문 토큰(SL)도 포함."""
+    chunks = []
+    chunk, start, end = "", -1, -1
+    for token in kiwi.tokenize(text):
+        if token.tag in ("NNG", "NNP", "SL"):
+            if token.start == end:
+                chunk += token.form
+            else:
+                if chunk:
+                    chunks.append((chunk, start, end))
+                chunk, start = token.form, token.start
+            end = token.start + len(token.form)
+        else:
+            if chunk:
+                chunks.append((chunk, start, end))
+            chunk, end = "", -1
+    if chunk:
+        chunks.append((chunk, start, end))
+    return chunks
+
+def extract_top_keywords(rows, top_n=5):
+    """수집된 글의 제목+요약에서 명사·명사구를 뽑아 언급 글 수 기준 top N 반환.
+
+    - 같은 글에서 여러 번 나와도 1회로 셈 (한 글이 순위를 왜곡하지 않게)
+    - 한 칸 띄어 인접한 명사 쌍은 명사구로도 셈 ("레벨테스트 준비") — 가중치를 줘서
+      "준비" 같은 애매한 단독 명사보다 구체적인 구가 상위에 오게 함
+    - 이미 뽑힌 키워드를 포함하거나 그 일부인 후보는 건너뜀 (중복 방지)
     반환: [{"키워드", "언급글수", "예시글": [row, ...]}, ...]
     """
     kiwi = _get_kiwi()
-    counter = Counter()
+    scores = Counter()
     keyword_rows = {}  # 키워드 → 해당 키워드가 나온 글 목록
 
     for row in rows:
         text = f"{row.get('제목', '')} {row.get('요약', '')}"
-        nouns = set()
-        # 붙어 있는 명사 토큰은 복합명사로 합침 ("레벨" + "테스트" → "레벨테스트")
-        chunk = ""
-        chunk_end = -1
-        for token in kiwi.tokenize(text):
-            if token.tag in ("NNG", "NNP"):
-                if token.start == chunk_end:
-                    chunk += token.form
-                else:
-                    if len(chunk) >= 2 and chunk not in STOPWORDS:
-                        nouns.add(chunk)
-                    chunk = token.form
-                chunk_end = token.start + len(token.form)
-            else:
-                if len(chunk) >= 2 and chunk not in STOPWORDS:
-                    nouns.add(chunk)
-                chunk = ""
-                chunk_end = -1
-        if len(chunk) >= 2 and chunk not in STOPWORDS:
-            nouns.add(chunk)
-        for word in nouns:
-            counter[word] += 1
-            keyword_rows.setdefault(word, []).append(row)
+        chunks = _noun_chunks(kiwi, text)
+
+        # 화자 표현·잡토큰은 구를 만들기 전에 아예 걸러냄
+        chunks = [c for c in chunks if c[0].lower() not in HARD_STOPWORDS]
+
+        terms = set()
+        weights = {}
+        for word, _, _ in chunks:
+            if len(word) >= 2 and word not in STOPWORDS:
+                terms.add(word)
+                weights[word] = 1.0
+        # 한 칸 띄어 인접한 명사 쌍 → 명사구 ("레벨테스트" + "준비" → "레벨테스트 준비")
+        for (w1, _, e1), (w2, s2, _) in zip(chunks, chunks[1:]):
+            if s2 - e1 == 1 and len(w1) >= 2 and len(w2) >= 2:
+                # 두 단어 다 불용어면 구도 애매함 ("준비 방법" 등) → 제외
+                if w1 in STOPWORDS and w2 in STOPWORDS:
+                    continue
+                phrase = f"{w1} {w2}"
+                terms.add(phrase)
+                weights[phrase] = BIGRAM_WEIGHT
+
+        for term in terms:
+            scores[term] += weights[term]
+            keyword_rows.setdefault(term, []).append(row)
+
+    # 점수순으로 뽑되, 이미 뽑힌 키워드와 포함 관계인 후보는 건너뜀
+    # ("레벨테스트"와 "레벨테스트 준비"가 같이 나오는 것 방지)
+    picked = []
+    for term, _ in scores.most_common():
+        if len(picked) >= top_n:
+            break
+        if any(term in p or p in term for p in picked):
+            continue
+        picked.append(term)
 
     return [
-        {"키워드": word, "언급글수": count, "예시글": keyword_rows[word]}
-        for word, count in counter.most_common(top_n)
+        {"키워드": term, "언급글수": len(keyword_rows[term]), "예시글": keyword_rows[term]}
+        for term in picked
     ]
 
 # ── 관련 뉴스 검색 + 보도자료 라벨링 ──────────────────────────────
