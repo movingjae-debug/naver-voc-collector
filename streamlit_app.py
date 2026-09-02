@@ -30,6 +30,14 @@ with st.sidebar:
     )
     seeds = [s.strip() for s in seeds_text.splitlines() if s.strip()]
 
+    season_kws = voc.seasonal_seeds()
+    use_seasonal = st.toggle(
+        "시즌 키워드 자동 추가", value=True,
+        help="교육 연간 일정에 맞는 이달의 키워드를 시드에 자동으로 추가합니다.",
+    )
+    if use_seasonal and season_kws:
+        st.caption(f"📅 이달의 시즌 키워드: {', '.join(season_kws)}")
+
     expand = st.toggle("자동완성으로 키워드 확장", value=True)
     max_sug = st.slider("시드당 확장 키워드 수", 0, 15, voc.MAX_SUGGESTIONS_PER_SEED)
 
@@ -58,6 +66,9 @@ if st.button("🚀 수집 시작", type="primary", use_container_width=True):
     voc.MAX_SUGGESTIONS_PER_SEED = max_sug
     voc.PARENT_FILTER = parent_filter
     voc.DISPLAY_PER_CHANNEL = display_per_channel
+
+    if use_seasonal:
+        seeds += [kw for kw in season_kws if kw not in seeds]
 
     # 1) 키워드 확장
     with st.status("🌱 키워드 확장 중...", expanded=True) as status:
@@ -132,11 +143,12 @@ if "voc_df" in st.session_state:
             for entry in top_keywords:
                 kw = entry["키워드"]
                 status.update(label=f"관련 뉴스 검색 중... [{kw}]")
+                news = planner.search_news(kw)
                 plan.append({
                     **entry,
-                    "뉴스": planner.search_news(kw),
-                    "블로그초안": planner.blog_title_ideas(kw),
-                    "카드뉴스초안": planner.cardnews_ideas(kw),
+                    "뉴스": news,
+                    "블로그초안": planner.blog_idea_drafts(kw, entry["예시글"], news),
+                    "카드뉴스초안": planner.cardnews_idea_drafts(kw, entry["예시글"], news),
                 })
             status.update(label="✅ 분석 완료", state="complete")
         st.session_state["content_plan"] = plan

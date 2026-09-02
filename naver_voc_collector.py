@@ -27,6 +27,31 @@ SEED_KEYWORDS = [
     "고교학점제",       # L1/L2 - 고교학점제
 ]
 
+# ✅ 월별 시즌 키워드 (교육 연간 일정 기반, 수집 시점의 달에 맞춰 시드에 자동 추가)
+SEASONAL_KEYWORDS = {
+    1: ["겨울방학 계획", "예비중1", "예비고1"],
+    2: ["신학기 준비", "예비중1 공부"],
+    3: ["새학기 적응", "3월 학력평가"],
+    4: ["1학기 중간고사", "수행평가"],
+    5: ["중간고사 성적", "수행평가"],
+    6: ["6월 모의고사", "기말고사 준비"],
+    7: ["기말고사 성적", "여름방학 계획"],
+    8: ["여름방학 공부", "2학기 준비"],
+    9: ["9월 모의고사", "2학기 중간고사"],
+    10: ["2학기 중간고사", "진로 체험"],
+    11: ["수능", "기말고사 준비"],
+    12: ["겨울방학 계획", "예비중1"],
+}
+
+# 시즌 키워드 자동 추가 여부 (Streamlit 사이드바에서 토글)
+USE_SEASONAL = True
+
+def seasonal_seeds(month=None):
+    """수집 시점의 달에 해당하는 시즌 키워드 반환"""
+    if month is None:
+        month = datetime.today().month
+    return SEASONAL_KEYWORDS.get(month, [])
+
 # 시드당 자동완성 키워드 최대 몇 개까지 가져올지
 MAX_SUGGESTIONS_PER_SEED = 8
 
@@ -73,9 +98,15 @@ def get_suggestions(seed):
         return []
 
 def build_keywords():
-    """시드 키워드 + 자동완성 확장 키워드 목록 생성"""
+    """시드 키워드 (+ 시즌 키워드) + 자동완성 확장 키워드 목록 생성"""
+    seeds = list(SEED_KEYWORDS)
+    if USE_SEASONAL:
+        season = [kw for kw in seasonal_seeds() if kw not in seeds]
+        if season:
+            print(f"📅 시즌 키워드 추가 ({datetime.today().month}월): {', '.join(season)}")
+        seeds += season
     keywords = []
-    for seed in SEED_KEYWORDS:
+    for seed in seeds:
         if seed not in keywords:
             keywords.append(seed)
         expanded = get_suggestions(seed)

@@ -159,26 +159,64 @@ def search_news(keyword, display=8):
         })
     return articles
 
-# ── 템플릿 기반 제목 초안 ──────────────────────────────
+# ── 콘텐츠 초안 (수집 데이터 주입형) ──────────────────────────────
+# 실제 학부모 질문·뉴스를 소재로 쓰고, 부족한 자리만 템플릿으로 채움
 
 BLOG_TEMPLATES = [
     "{kw}, 학부모가 가장 많이 묻는 질문 5가지",
     "우리 아이 {kw} 고민, 이렇게 접근해보세요",
-    "{kw} 때문에 흔들리는 아이, 부모가 해줄 수 있는 것",
     "{kw}에 대해 학부모들이 자주 하는 오해 3가지",
-    "{kw} 앞에 선 부모의 마음, 선배맘은 이렇게 넘겼다",
 ]
 
 CARDNEWS_TEMPLATES = [
-    "{kw} 궁금증 총정리 — 학부모 질문 TOP 5",
     "{kw} 체크리스트: 우리 아이는 지금 어디쯤?",
-    "숫자로 보는 {kw} — 요즘 학부모들의 진짜 고민",
     "{kw} 대응 3단계 가이드",
     "선배맘들의 {kw} 조언 모음.zip",
 ]
 
-def blog_title_ideas(keyword):
-    return [t.format(kw=keyword) for t in BLOG_TEMPLATES]
+# 질문형 글 제목 판별 (물음표 또는 한국어 의문형 어미)
+QUESTION_PATTERN = re.compile(r"[?？]|(나요|까요|할까|일까|은지|는지|하죠|인가요|건가요)\s*$|(어떻게|어디|언제|왜|뭐|얼마나)")
 
-def cardnews_ideas(keyword):
-    return [t.format(kw=keyword) for t in CARDNEWS_TEMPLATES]
+def _question_titles(posts, limit=3):
+    """수집된 글 중 질문형 제목만 골라냄"""
+    out = []
+    for row in posts:
+        title = row.get("제목", "").strip()
+        if title and QUESTION_PATTERN.search(title):
+            out.append(title)
+        if len(out) >= limit:
+            break
+    return out
+
+def _usable_news(news, limit=2):
+    """보도자료 추정이 아닌 기사만"""
+    return [a for a in news if not a.get("보도자료추정")][:limit]
+
+def blog_idea_drafts(keyword, posts, news, total=5):
+    """블로그 주제 초안: 실제 질문 답변형 + 뉴스 해설형 + 템플릿 백업"""
+    ideas = []
+    for title in _question_titles(posts, 2):
+        ideas.append(f'실제 질문에 답하기 — “{title}”')
+    for article in _usable_news(news, 1):
+        ideas.append(f'뉴스 풀어쓰기 — “{article["제목"]}”을(를) 학부모 눈높이로 해설')
+    for t in BLOG_TEMPLATES:
+        if len(ideas) >= total:
+            break
+        ideas.append(t.format(kw=keyword))
+    return ideas[:total]
+
+def cardnews_idea_drafts(keyword, posts, news, total=5):
+    """카드뉴스 주제 초안: 실제 고민 Q&A형 + 기사 요약형 + 템플릿 백업"""
+    ideas = []
+    questions = _question_titles(posts, 3)
+    if questions:
+        ideas.append(
+            f"‘{keyword}’ 실제 고민 Q&A 카드 — " + " / ".join(f"“{q}”" for q in questions[:2])
+        )
+    for article in _usable_news(news, 1):
+        ideas.append(f'기사 한 장 요약 — “{article["제목"]}” 핵심만 카드로')
+    for t in CARDNEWS_TEMPLATES:
+        if len(ideas) >= total:
+            break
+        ideas.append(t.format(kw=keyword))
+    return ideas[:total]
